@@ -25,6 +25,8 @@ class SplitImage:
         # This will be the directory relative to the location where files are present.
         self._data_directory = 'split_images'
 
+        self._max_angle_deviation = 5
+
     def _get_edges(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray_cropped = self._rectangle_crop(gray)
@@ -60,18 +62,20 @@ class SplitImage:
         a, b = pd.cut(df['y'], 100, retbins=True)
         return a.value_counts().sort_index()
 
-    def _get_start_end(self, df, index):
+    def _get_start_end(self, df, index, vertical_text_pointcount_min=None):
+        if vertical_text_pointcount_min is None:
+            vertical_text_pointcount_min = self._vertical_text_pointcount_min
 
         start = index
         end = index
         while start > 0:
-            if df.iloc[start] <= self._vertical_text_pointcount_min:
+            if df.iloc[start] <= vertical_text_pointcount_min:
                 start = start - 1
             else:
                 break
 
         while end < df.shape[0] - 1:
-            if df.iloc[end] <= self._vertical_text_pointcount_min:
+            if df.iloc[end] <= vertical_text_pointcount_min:
                 end = end + 1
             else:
                 break
@@ -103,7 +107,7 @@ class SplitImage:
             test_bin_count = test_bin_count.drop([idx], axis=0)
 
         y_min_index = bin_count.index.tolist().index(idx)
-        start, end = self._get_start_end(bin_count, y_min_index, normal_value=bin_count.min())
+        start, end = self._get_start_end(bin_count, y_min_index, vertical_text_pointcount_min=bin_count.min())
         return (start + end) // 2
 
     def _get_score(self, img_df):
@@ -115,13 +119,12 @@ class SplitImage:
         der_right = deriv.iloc[end - 3:end + 3].max()
         return max(der_left, der_right)
 
-    def _find_angle(img_df):
+    def _find_angle(self, img_df):
         # plt.figure(figsize=(20, 15))
-        MAX_ANGLE_DEV = 5
+
         score_df = pd.DataFrame([], columns=['score'])
         # plot_index = 1
-        for angle in range(-MAX_ANGLE_DEV, MAX_ANGLE_DEV):
-            print('Angle: ', angle)
+        for angle in range(-self._max_angle_deviation, self._max_angle_deviation):
 
             def rotate_internal(row):
                 return self._rotate(row, angle)
@@ -129,10 +132,9 @@ class SplitImage:
             angle = math.pi / 180 * angle
             rotated_df = img_df.apply(rotate_internal, axis=1)
             rotated_df = pd.DataFrame(rotated_df.values.tolist(), columns=['x', 'y'])
-            print('Fetching Score')
             score_df.loc[angle] = self._get_score(rotated_df)
 
-            # plt.subplot(MAX_ANGLE_DEV, 2, plot_index)
+            # plt.subplot(self._max_angle_deviation, 2, plot_index)
             # plt.scatter(rotated_df['x'], rotated_df['y'], )
 
             # bin_count = self._get_bin_count(rotated_df)
@@ -151,18 +153,22 @@ class SplitImage:
 
     def _splitted_filenames(self, image_file):
         tokens = image_file.split('.')
-        name = tokens[:-1].join('.')
-        fname1 = name + '_1.{extension}'.format(tokens[-1])
-        fname2 = name + '_2.{extension}'.format(tokens[-1])
+        name = '.'.join(tokens[:-1])
+        fname1 = name + '_1.{extension}'.format(extension=tokens[-1])
+        fname2 = name + '_2.{extension}'.format(extension=tokens[-1])
 
         # Create a diretory and move these filepaths inside that directory.
         new_directory = os.path.dirname(image_file) + '/{}/'.format(self._data_directory)
+        if not os.path.exists(new_directory):
+            os.mkdir(new_directory)
+
         fname1 = new_directory + os.path.basename(fname1)
         fname2 = new_directory + os.path.basename(fname2)
 
         return (fname1, fname2)
 
     def _split_file(self, image_file):
+        print('Splitting file {}'.format(image_file))
         img = cv2.imread(image_file)
         img1, img2 = self._split_image(img)
         fname1, fname2 = self._splitted_filenames(image_file)

@@ -6,10 +6,19 @@ from split_image import SplitImage
 
 
 def main(image_directory):
+    if '/' != image_directory[-1]:
+        image_directory += '/'
+
     fpaths = []
     fnames = os.listdir(image_directory)
     for fname in fnames:
-        fpaths.append(image_directory + fname)
+        fpath = image_directory + fname
+
+        # Skip directories
+        if os.path.isdir(fpath):
+            continue
+
+        fpaths.append(fpath)
 
     # Assuming that naming of image files has the same order as the page numbers
     fpaths.sort()
@@ -19,7 +28,7 @@ def main(image_directory):
     sorted_files = []
     for fpath in fpaths:
         first_page, second_page = files_dict[fpath]
-        sorted_files.append([first_page, second_page])
+        sorted_files += [first_page, second_page]
 
     ImagesToPdf(sorted_files).convert()
 

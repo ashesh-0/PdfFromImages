@@ -10,8 +10,9 @@ class ImagesToPdf(FPDF):
     def __init__(self, image_files, fname='Book.pdf'):
         super().__init__()
         self._image_files = image_files
-        self._x = 0
-        self._y = 0
+        self._image_area_fraction = 0.9
+        self._x = self.w * (1 - self._image_area_fraction) / 2
+        self._y = self.h * (1 - self._image_area_fraction) / 2
         self._output_fname = fname
 
     def convert(self):
@@ -20,8 +21,6 @@ class ImagesToPdf(FPDF):
 
             self.add_page()
             height, width, _ = cv2.imread(image).shape
-            # 1 px = 0.264583 mm (FPDF default is mm)
-            # pdf.image(imageFile, 0, 0, float(width * 0.264583), float(height * 0.264583))
-            self.image(image, self._x, self._y, width / 5, height / 5)
+            self.image(image, self._x, self._y, self.w * self._image_area_fraction, self.h * self._image_area_fraction)
 
         self.output(self._output_fname, "F")

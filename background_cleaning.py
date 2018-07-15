@@ -1,6 +1,7 @@
+import os
+
 import cv2
 import numpy as np
-import math
 
 from constants import get_constants
 
@@ -16,6 +17,7 @@ class BackgroundCleaning:
     def __init__(self, img_files):
         self._img_files = img_files
         self._constants = get_constants()['background_cleaning']
+        self._new_files = {}
 
     def get_mask(self, img):
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -29,7 +31,7 @@ class BackgroundCleaning:
         non_zero_grad = np.diff(non_zero)
         if non_zero[0] > self._constants['left_book_start_threshold']:
             index = 0
-            left_score = BoundaryScore(angle, index, non_zero_grad[index])
+            left_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
             page_indices = np.argwhere(non_zero > self._constants['left_book_start_threshold'])
             if len(page_indices) == 0:
@@ -39,16 +41,24 @@ class BackgroundCleaning:
             s_index = max(0, index - 5)
             e_index = min(len(non_zero_grad) - 1, index + 5)
 
-            left_score = BoundaryScore(angle, index, max(non_zero_grad[s_index:e_index]))
+            left_score = BoundaryScore(angle, index, max(np.abs(non_zero_grad[s_index:e_index])))
+
+        rotated_mask = rotated_mask.copy()
+        s_index = max(0, index - 3)
+        e_index = min(rotated_mask.shape[1] - 1, index + 3)
+
+        rotated_mask[:, s_index:e_index] = 0
 
         return left_score
 
     def _get_right_score(self, angle, rotated_mask):
+
         non_zero = np.count_nonzero(rotated_mask, axis=0)
         non_zero_grad = np.diff(non_zero)
+
         if non_zero[-1] > self._constants['right_book_start_threshold']:
-            index = len(non_zero) - 1
-            right_score = BoundaryScore(angle, index, non_zero_grad[index])
+            index = len(non_zero_grad) - 1
+            right_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
             page_indices = np.argwhere(non_zero > self._constants['right_book_start_threshold'])
             if len(page_indices) == 0:
@@ -58,16 +68,16 @@ class BackgroundCleaning:
             s_index = max(0, index - 5)
             e_index = min(len(non_zero_grad) - 1, index + 5)
 
-            right_score = BoundaryScore(angle, index, max(non_zero_grad[s_index:e_index]))
+            right_score = BoundaryScore(angle, index, max(np.abs(non_zero_grad[s_index:e_index])))
 
         return right_score
 
     def get_score(self, mask, degree):
-        # radian
-        angle = math.pi / 180 * degree
-        rotated_mask = self._rotate_image(mask, angle)
-        left_score = self._get_left_score(degree, rotated_mask)
-        right_score = self._get_right_score(degree, rotated_mask)
+
+        rotated_mask = self._rotate_image(mask, degree)
+        left_score = self._get_left_score(degree, rotated_mask.copy())
+        right_score = self._get_right_score(degree, rotated_mask.copy())
+
         return (left_score, right_score)
 
     def _rotate_image(self, mat, angle):
@@ -110,6 +120,7 @@ class BackgroundCleaning:
     def get_cleaned_image(self, img_file):
         img = cv2.imread(img_file)
         mask = self.get_mask(img)
+
         left_boundary, right_boundary = self._find_orientation(mask)
         return self._remove_background(img, left_boundary, right_boundary)
 
@@ -144,12 +155,32 @@ class BackgroundCleaning:
 
     def _remove_background(self, img, left_boundary, right_boundary):
         shape = img.shape
-        img = self._remove_background_left(img, left_boundary)
-        assert img.shape == shape
         img = self._remove_background_right(img, right_boundary)
         assert img.shape == shape
 
+        img = self._remove_background_left(img, left_boundary)
+        assert img.shape == shape
+
         return img
+
+    def _convert_to_file(self, img, img_file):
+        direc = os.path.dirname(img_file)
+        direc += '/bkgc/'
+        if not os.path.exists(direc):
+            os.mkdir(direc)
+
+        tokens = os.path.basename(img_file).split('.')
+        extension = tokens[-1]
+
+        new_fname = direc + '.'.join(tokens[:-1]) + '_bkgc.' + extension
+        cv2.imwrite(new_fname, img)
+        self._new_files[img_file] = new_fname
+
+    def cleanup(self):
+        for _, cleaned_file in self._new_files.items():
+            if os.path.exists(cleaned_file):
+                print('Removing:', cleaned_file)
+                os.remove(cleaned_file)
 
     def _get_cleaned_image_file(self, img_file):
         img = self.get_cleaned_image(img_file)

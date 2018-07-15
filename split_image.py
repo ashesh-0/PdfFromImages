@@ -10,6 +10,9 @@ import numpy as np
 import pandas as pd
 from sklearn import linear_model
 
+from utils import rotate_image
+from constants import get_constants
+
 
 class SplitImage:
     def __init__(self, image_files):
@@ -24,7 +27,7 @@ class SplitImage:
 
         # This will be the directory relative to the location where files are present.
         self._data_directory = 'split_images'
-
+        self._constants = get_constants()['split_image']
         self._max_angle_deviation = 5
 
     def _get_edges(self, img):
@@ -34,13 +37,13 @@ class SplitImage:
         edges = cv2.Canny(invert, 50, 150, apertureSize=self._canny_apertureSize)
         return edges
 
-    def _get_cordinates(self, edges):
-        points = []
-        for i in range(edges.shape[0]):
-            for j in range(edges.shape[1]):
-                if edges[i, j]:
-                    points.append((i, j))
-        return points
+    # def _get_cordinates(self, edges):
+    #     points = []
+    #     for i in range(edges.shape[0]):
+    #         for j in range(edges.shape[1]):
+    #             if edges[i, j]:
+    #                 points.append((i, j))
+    #     return points
 
     def _rectangle_crop(self, img):
         skip_x = int(img.shape[0] / 2 * self._x_crop_fraction)
@@ -48,19 +51,24 @@ class SplitImage:
         img = img[skip_x:-skip_x, skip_y:-skip_y, ]
         return img
 
-    def _rotate(self, row, angle):
-        ox, oy = self._origin
+    # def _rotate(self, row, angle):
+    #     ox, oy = self._origin
 
-        px = row['x']
-        py = row['y']
+    #     px = row['x']
+    #     py = row['y']
 
-        qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
-        qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
-        return qx, qy
+    #     qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
+    #     qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
+    #     return qx, qy
 
-    def _get_bin_count(self, df):
-        a, b = pd.cut(df['y'], 100, retbins=True)
-        return a.value_counts().sort_index()
+    def _get_bin_count(self, rotated_edges):
+        non_zero = np.count_nonzero(rotated_edges, axis=0)
+        df = pd.Series(non_zero, index=list(range(0, rotated_edges.shape[1])))
+        df = df.groupby(np.arange(len(df)) // self._constants['bin_size'], axis=0).sum()
+        return df
+
+    def _get_y_from_bin(self, bin):
+        return (bin + 0.5) * self._constants['bin_size']
 
     def _get_start_end(self, df, index, vertical_text_pointcount_min=None):
         if vertical_text_pointcount_min is None:
@@ -81,64 +89,60 @@ class SplitImage:
                 break
         return (start, end)
 
-    def _find_y(self, img_df):
-        bin_count = self._get_bin_count(img_df).sort_index()
+    # def _find_y(self, img_df):
+    #     bin_count = self._get_bin_count(img_df)
 
-        idx = bin_count.idxmin()
-        y_min_index = bin_count.index.tolist().index(idx)
+    #     idx = bin_count.idxmin()
+    #     y_min_index = bin_count.index.tolist().index(idx)
 
-        start, end = self._get_start_end(bin_count, y_min_index)
+    #     start, end = self._get_start_end(bin_count, y_min_index)
 
-        return int((start + end) / 2)
+    #     return int((start + end) / 2)
 
     def _near_center(self, index, size):
         mid = size // 2
         deviation = int(0.1 * size)
         return index in range(mid - deviation, mid + deviation)
 
-    def _get_y_min_index(self, bin_count):
-
+    def _get_y_min_bin_index(self, bin_count, y_max):
+        """
+        Given the histogram (bin_count) of how many points lie in a y-axis range, it returns a middle bin
+        """
         test_bin_count = bin_count.copy()
         while test_bin_count.shape[0] > 0:
             idx = test_bin_count.idxmin()
-            y_min_index = test_bin_count.index.tolist().index(idx)
-            if self._near_center(y_min_index, test_bin_count.shape[0]):
+            y_min_index = self._get_y_from_bin(idx)
+            if self._near_center(y_min_index, y_max):
                 break
             test_bin_count = test_bin_count.drop([idx], axis=0)
 
-        y_min_index = bin_count.index.tolist().index(idx)
-        start, end = self._get_start_end(bin_count, y_min_index, vertical_text_pointcount_min=bin_count.min())
+        start, end = self._get_start_end(bin_count, idx, vertical_text_pointcount_min=bin_count.min())
         return (start + end) // 2
 
-    def _get_score(self, img_df):
-        bin_count = self._get_bin_count(img_df)
-        y_min_index = self._get_y_min_index(bin_count)
-        start, end = self._get_start_end(bin_count, y_min_index)
+    def _get_score(self, rotated_edges):
+        bin_count = self._get_bin_count(rotated_edges)
+        y_min_bin_index = self._get_y_min_bin_index(bin_count, rotated_edges.shape[1])
+        start, end = self._get_start_end(bin_count, y_min_bin_index)
         deriv = bin_count.diff().abs()
         der_left = deriv.iloc[start - 3:start + 3].max()
         der_right = deriv.iloc[end - 3:end + 3].max()
         return max(der_left, der_right)
 
-    def _find_angle(self, img_df):
+    def _find_angle(self, edges):
         # plt.figure(figsize=(20, 15))
 
         score_df = pd.DataFrame([], columns=['score'])
         # plot_index = 1
         for angle in range(-self._max_angle_deviation, self._max_angle_deviation):
 
-            def rotate_internal(row):
-                return self._rotate(row, angle)
-
-            angle = math.pi / 180 * angle
-            rotated_df = img_df.apply(rotate_internal, axis=1)
-            rotated_df = pd.DataFrame(rotated_df.values.tolist(), columns=['x', 'y'])
-            score_df.loc[angle] = self._get_score(rotated_df)
+            rotated_edges = rotate_image(edges, angle)
+            score_df.loc[angle] = self._get_score(rotated_edges)
 
             # plt.subplot(self._max_angle_deviation, 2, plot_index)
             # plt.scatter(rotated_df['x'], rotated_df['y'], )
 
             # bin_count = self._get_bin_count(rotated_df)
-            # y_val = bin_count.index[self._get_y_min_index(bin_count)].mid
+            # y_val = bin_count.index[self._get_y_min_bin_index(bin_count)].mid
 
             # x_min = rotated_df.x.min()
             # x_max = rotated_df.x.max()
@@ -179,16 +183,14 @@ class SplitImage:
     def _split_image(self, img):
         # First work is to find the optimal angle to rotate
         edges = self._get_edges(img)
-        df = pd.DataFrame(self._get_cordinates(edges), columns=['x', 'y'])
-        angle = self._find_angle(df)
+        angle = self._find_angle(edges)
 
         # After angle is found
-        rotated_df = df.apply(lambda row: self._rotate(row, angle), axis=1)
-        rotated_df = pd.DataFrame(rotated_df.values.tolist(), columns=['x', 'y'])
+        rotated_edges = rotate_image(edges, angle)
 
-        bin_count = self._get_bin_count(rotated_df)
-        y_min_index = self._get_y_min_index(bin_count)
-        y_val_in_rectangle = int(bin_count.index[y_min_index].mid)
+        bin_count = self._get_bin_count(rotated_edges)
+        y_min_bin_index = self._get_y_min_bin_index(bin_count, rotated_edges.shape[1])
+        y_val_in_rectangle = int(self._get_y_from_bin(y_min_bin_index))
 
         y_val_outside_rectangle_original = self._y_crop_fraction * img.shape[1] / 2
         x_val_outside_rectangle_original = self._x_crop_fraction * img.shape[0] / 2

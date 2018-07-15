@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 
 from constants import get_constants
+from utils import rotate_image
 
 
 class BoundaryScore:
@@ -74,31 +75,11 @@ class BackgroundCleaning:
 
     def get_score(self, mask, degree):
 
-        rotated_mask = self._rotate_image(mask, degree)
+        rotated_mask = rotate_image(mask, degree)
         left_score = self._get_left_score(degree, rotated_mask.copy())
         right_score = self._get_right_score(degree, rotated_mask.copy())
 
         return (left_score, right_score)
-
-    def _rotate_image(self, mat, angle):
-        # angle in degrees
-
-        height, width = mat.shape[:2]
-        image_center = (width / 2, height / 2)
-
-        rotation_mat = cv2.getRotationMatrix2D(image_center, angle, 1.)
-
-        abs_cos = abs(rotation_mat[0, 0])
-        abs_sin = abs(rotation_mat[0, 1])
-
-        bound_w = int(height * abs_sin + width * abs_cos)
-        bound_h = int(height * abs_cos + width * abs_sin)
-
-        rotation_mat[0, 2] += bound_w / 2 - image_center[0]
-        rotation_mat[1, 2] += bound_h / 2 - image_center[1]
-
-        rotated_mat = cv2.warpAffine(mat, rotation_mat, (bound_w, bound_h))
-        return rotated_mat
 
     def _find_orientation(self, mask):
         angles = self._constants['angles']
@@ -139,17 +120,17 @@ class BackgroundCleaning:
 
     def _remove_background_left(self, img, boundary):
         orig_shape = img.shape
-        new_img = self._rotate_image(img, boundary.angle)
+        new_img = rotate_image(img, boundary.angle)
         new_img[:, :(boundary.x - 1)] = 0
-        left_cropped = self._rotate_image(new_img, -1 * boundary.angle)
+        left_cropped = rotate_image(new_img, -1 * boundary.angle)
 
         return self._remove_zero_padding(left_cropped, orig_shape)
 
     def _remove_background_right(self, img, boundary):
         orig_shape = img.shape
-        new_img = self._rotate_image(img, boundary.angle)
+        new_img = rotate_image(img, boundary.angle)
         new_img[:, (boundary.x + 1):] = 0
-        right_cropped = self._rotate_image(new_img, -1 * boundary.angle)
+        right_cropped = rotate_image(new_img, -1 * boundary.angle)
 
         return self._remove_zero_padding(right_cropped, orig_shape)
 

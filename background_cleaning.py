@@ -34,7 +34,10 @@ class BackgroundCleaning:
             index = 0
             left_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
-            page_indices = np.argwhere(non_zero > self._constants['left_book_start_threshold'])
+            for fac in [1, 0.8, 0.5, 0.3]:
+                page_indices = np.argwhere(non_zero > self._constants['left_book_start_threshold'] * fac)
+                if len(page_indices) > 0:
+                    break
             if len(page_indices) == 0:
                 raise Exception('Big gradient threshold {}. No index matched'.format(
                     self._constants['left_book_start_threshold']))
@@ -61,10 +64,14 @@ class BackgroundCleaning:
             index = len(non_zero_grad) - 1
             right_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
-            page_indices = np.argwhere(non_zero > self._constants['right_book_start_threshold'])
+            for fac in [1, 0.8, 0.5, 0.3]:
+                page_indices = np.argwhere(non_zero > self._constants['right_book_start_threshold'] * fac)
+                if len(page_indices) > 0:
+                    break
             if len(page_indices) == 0:
                 raise Exception('Big gradient threshold {}. No index matched'.format(
                     self._constants['right_book_start_threshold']))
+
             index = page_indices[-1][0]
             s_index = max(0, index - 5)
             e_index = min(len(non_zero_grad) - 1, index + 5)
@@ -156,6 +163,7 @@ class BackgroundCleaning:
         new_fname = direc + '.'.join(tokens[:-1]) + '_bkgc.' + extension
         cv2.imwrite(new_fname, img)
         self._new_files[img_file] = new_fname
+        return new_fname
 
     def cleanup(self):
         for _, cleaned_file in self._new_files.items():
@@ -168,9 +176,10 @@ class BackgroundCleaning:
         return self._convert_to_file(img, img_file)
 
     def run(self):
-        output = {}
-        for img_file in self._img_files:
-            cleaned_img_file = self._get_cleaned_image_file(img_file)
-            output[img_file] = cleaned_img_file
+        for i, img_file in enumerate(self._img_files):
+            self._get_cleaned_image_file(img_file)
+            if i % 10 == 1:
+                print('[ BackgroundCleaning ]: {}% complete'.format((i * 100) // len(self._img_files)))
 
-        return output
+        print('[ BackgroundCleaning ]: 100% complete')
+        return self._new_files

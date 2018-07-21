@@ -180,9 +180,11 @@ class SplitImage:
 
     def split(self):
         output = {}
-        for image_file in self._image_files:
+        for i, image_file in enumerate(self._image_files):
             f1, f2 = self._split_file(image_file)
-            break
             output[image_file] = (f1, f2)
+            if i % 10 == 1:
+                print('[ SplitImage ]: {}% complete'.format((i * 100) // len(self._image_files)))
 
+        print('[ SplitImage ]: 100% complete')
         return output

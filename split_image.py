@@ -4,11 +4,10 @@ each page contains one page of the book
 """
 import math
 import os
-
+import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import pandas as pd
-from sklearn import linear_model
 
 from utils import rotate_image
 from constants import get_constants
@@ -18,9 +17,9 @@ class SplitImage:
     def __init__(self, image_files):
         self._image_files = image_files
         self._origin = (0, 0)
-        self._y_crop_fraction = 0.7
-        self._x_crop_fraction = 0.4
-        self._buffer = 50
+        self._y_crop_fraction = 0.01
+        self._x_crop_fraction = 0.01
+        self._buffer = 40
 
         self._canny_apertureSize = 3
         self._vertical_text_pointcount_min = 400
@@ -37,29 +36,11 @@ class SplitImage:
         edges = cv2.Canny(invert, 50, 150, apertureSize=self._canny_apertureSize)
         return edges
 
-    # def _get_cordinates(self, edges):
-    #     points = []
-    #     for i in range(edges.shape[0]):
-    #         for j in range(edges.shape[1]):
-    #             if edges[i, j]:
-    #                 points.append((i, j))
-    #     return points
-
     def _rectangle_crop(self, img):
         skip_x = int(img.shape[0] / 2 * self._x_crop_fraction)
         skip_y = int(img.shape[1] / 2 * self._y_crop_fraction)
         img = img[skip_x:-skip_x, skip_y:-skip_y, ]
         return img
-
-    # def _rotate(self, row, angle):
-    #     ox, oy = self._origin
-
-    #     px = row['x']
-    #     py = row['y']
-
-    #     qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
-    #     qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
-    #     return qx, qy
 
     def _get_bin_count(self, rotated_edges):
         non_zero = np.count_nonzero(rotated_edges, axis=0)
@@ -69,6 +50,12 @@ class SplitImage:
 
     def _get_y_from_bin(self, bin):
         return (bin + 0.5) * self._constants['bin_size']
+
+    def _get_y_wrt_center(self, y_wrt_top_left_corner, img):
+        return y_wrt_top_left_corner - img.shape[1] // 2
+
+    def _get_y_wrt_left_top_corner(self, y_wrt_center, img):
+        return y_wrt_center + img.shape[1] // 2
 
     def _get_start_end(self, df, index, vertical_text_pointcount_min=None):
         if vertical_text_pointcount_min is None:
@@ -89,39 +76,28 @@ class SplitImage:
                 break
         return (start, end)
 
-    # def _find_y(self, img_df):
-    #     bin_count = self._get_bin_count(img_df)
-
-    #     idx = bin_count.idxmin()
-    #     y_min_index = bin_count.index.tolist().index(idx)
-
-    #     start, end = self._get_start_end(bin_count, y_min_index)
-
-    #     return int((start + end) / 2)
-
     def _near_center(self, index, size):
         mid = size // 2
         deviation = int(0.1 * size)
         return index in range(mid - deviation, mid + deviation)
 
-    def _get_y_min_bin_index(self, bin_count, y_max):
+    def _get_y_min_bin_index(self, bin_count):
         """
         Given the histogram (bin_count) of how many points lie in a y-axis range, it returns a middle bin
         """
         test_bin_count = bin_count.copy()
         while test_bin_count.shape[0] > 0:
             idx = test_bin_count.idxmin()
-            y_min_index = self._get_y_from_bin(idx)
-            if self._near_center(y_min_index, y_max):
+            if self._near_center(idx, bin_count.shape[0]):
                 break
             test_bin_count = test_bin_count.drop([idx], axis=0)
 
-        start, end = self._get_start_end(bin_count, idx, vertical_text_pointcount_min=bin_count.min())
+        start, end = self._get_start_end(bin_count, idx, vertical_text_pointcount_min=test_bin_count.loc[idx])
         return (start + end) // 2
 
     def _get_score(self, rotated_edges):
         bin_count = self._get_bin_count(rotated_edges)
-        y_min_bin_index = self._get_y_min_bin_index(bin_count, rotated_edges.shape[1])
+        y_min_bin_index = self._get_y_min_bin_index(bin_count)
         start, end = self._get_start_end(bin_count, y_min_bin_index)
         deriv = bin_count.diff().abs()
         der_left = deriv.iloc[start - 3:start + 3].max()
@@ -129,7 +105,7 @@ class SplitImage:
         return max(der_left, der_right)
 
     def _find_angle(self, edges):
-        # plt.figure(figsize=(20, 15))
+        plt.figure(figsize=(20, 15))
 
         score_df = pd.DataFrame([], columns=['score'])
         # plot_index = 1
@@ -139,16 +115,16 @@ class SplitImage:
             score_df.loc[angle] = self._get_score(rotated_edges)
 
             # plt.subplot(self._max_angle_deviation, 2, plot_index)
-            # plt.scatter(rotated_df['x'], rotated_df['y'], )
+            # plt.imshow(rotated_edges)
 
-            # bin_count = self._get_bin_count(rotated_df)
-            # y_val = bin_count.index[self._get_y_min_bin_index(bin_count)].mid
+            # bin_count = self._get_bin_count(rotated_edges)
+            # y_val = self._get_y_from_bin(self._get_y_min_bin_index(bin_count))
 
-            # x_min = rotated_df.x.min()
-            # x_max = rotated_df.x.max()
+            # x_min = 0
+            # x_max = rotated_edges.shape[0]
 
-            # plt.plot([x_min, x_max], [y_val, y_val])
-            # plt.title('Angle {} Score:{}'.format(angle *180/math.pi, score_df.loc[angle].values[0]))
+            # plt.plot([y_val, y_val], [x_min, x_max])
+            # plt.title('Angle {} Score:{}'.format(angle * 180 / math.pi, score_df.loc[angle].values[0]))
             # plot_index += 1
 
         # plt.show()
@@ -189,26 +165,13 @@ class SplitImage:
         rotated_edges = rotate_image(edges, angle)
 
         bin_count = self._get_bin_count(rotated_edges)
-        y_min_bin_index = self._get_y_min_bin_index(bin_count, rotated_edges.shape[1])
+        y_min_bin_index = self._get_y_min_bin_index(bin_count)
         y_val_in_rectangle = int(self._get_y_from_bin(y_min_bin_index))
 
-        y_val_outside_rectangle_original = self._y_crop_fraction * img.shape[1] / 2
-        x_val_outside_rectangle_original = self._x_crop_fraction * img.shape[0] / 2
+        y = self._get_y_wrt_center(y_val_in_rectangle, rotated_edges)
 
-        hypotenus = np.sqrt(
-            np.power(y_val_outside_rectangle_original, 2) + np.power(x_val_outside_rectangle_original, 2))
-        phi = math.atan(y_val_outside_rectangle_original / x_val_outside_rectangle_original)
-
-        y_val_outside_rectangle = hypotenus * math.sin(angle + phi)
-        if angle < 0:
-            y_val_outside_rectangle = y_val_outside_rectangle - img.shape[0] * math.sin(angle)
-        y_val = int(y_val_outside_rectangle + y_val_in_rectangle)
-
-        angle_degree = angle / math.pi * 180
-
-        M = cv2.getRotationMatrix2D((x_val_outside_rectangle_original, y_val_outside_rectangle_original), angle_degree,
-                                    1)
-        dst = cv2.warpAffine(img, M, (img.shape[1], img.shape[0]))
+        dst = rotate_image(img, angle)
+        y_val = self._get_y_wrt_left_top_corner(y, dst)
 
         first_image = dst[:, :(y_val + self._buffer), :]
         second_image = dst[:, (y_val - self._buffer):, :]
@@ -219,6 +182,7 @@ class SplitImage:
         output = {}
         for image_file in self._image_files:
             f1, f2 = self._split_file(image_file)
+            break
             output[image_file] = (f1, f2)
 
         return output

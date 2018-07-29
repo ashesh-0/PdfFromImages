@@ -25,27 +25,67 @@ class BackgroundCleaning:
         lower_white = self._constants['lower_white']
         upper_white = self._constants['upper_white']
         mask = cv2.inRange(hsv, lower_white, upper_white)
+        mask[mask != 0] = 1
         return mask
+
+    def _compute_grad_2(self, rotated_mask, right):
+        shift = 1 if right is True else -1
+
+        diff = np.roll(rotated_mask, shift, axis=1) - rotated_mask
+        # Makes sure that all values are either {1, 0, -1}
+        diff[diff > 0] = 1
+        diff[diff < 0] = -1
+        frac = self._constants['ignore_fraction']
+        # It needs to be at the start of the page itself. Ignore interior derivatives.
+        s = int(frac * rotated_mask.shape[1])
+        count = rotated_mask.sum(axis=0)
+        mean_val = count[s:-s].mean() * self._constants['mean_factor']
+
+        cutoff = int((1 - frac) * rotated_mask.shape[1])
+        if right:
+            diff[:, 0:cutoff] = 0
+            page_edge_index = np.argmax(count[::-1] > mean_val)
+            page_edge_index = rotated_mask.shape[1] - page_edge_index
+
+        else:
+            diff[:, -cutoff] = 0
+            page_edge_index = np.argmax(count > mean_val)
+
+        non_zero_grad = np.sum(diff, axis=0)
+
+        # This is equivalent to padding zeros on both ends and getting derivative of first and last row.
+        non_zero_grad[0] = max(non_zero_grad[0], count[0])
+        non_zero_grad[-1] = max(non_zero_grad[-1], count[-1])
+
+        index_values = np.array(range(0, rotated_mask.shape[1]))
+        index_values = np.abs(index_values - page_edge_index)
+        index_values = (index_values * self._constants['gradient']) / rotated_mask.shape[1]
+        index_values = 2 / (1 + np.exp(index_values))
+        non_zero_grad = non_zero_grad * index_values
+        return non_zero_grad
 
     def _get_left_score(self, angle, rotated_mask):
         non_zero = np.count_nonzero(rotated_mask, axis=0)
-        non_zero_grad = np.diff(non_zero)
+        non_zero_grad = self._compute_grad_2(rotated_mask, False)
         if non_zero[0] > self._constants['left_book_start_threshold']:
             index = 0
             left_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
-            for fac in [1, 0.8, 0.5, 0.3]:
-                page_indices = np.argwhere(non_zero > self._constants['left_book_start_threshold'] * fac)
+            for fac in self._constants['score_multiplier']:
+                page_indices = np.argwhere(non_zero_grad > self._constants['left_book_start_threshold'] * fac)
                 if len(page_indices) > 0:
                     break
             if len(page_indices) == 0:
-                raise Exception('Big gradient threshold {}. No index matched'.format(
+                print('Big gradient threshold {}. No index matched'.format(
                     self._constants['left_book_start_threshold']))
-            index = page_indices[0][0]
-            s_index = max(0, index - 5)
-            e_index = min(len(non_zero_grad) - 1, index + 5)
-
-            left_score = BoundaryScore(angle, index, max(np.abs(non_zero_grad[s_index:e_index])))
+                score = -1
+                index = 0
+            else:
+                index = page_indices[0][0]
+                s_index = max(0, index - 5)
+                e_index = min(len(non_zero_grad) - 1, index + 5)
+                score = max(np.abs(non_zero_grad[s_index:e_index]))
+            left_score = BoundaryScore(angle, index, score)
 
         rotated_mask = rotated_mask.copy()
         s_index = max(0, index - 3)
@@ -57,26 +97,28 @@ class BackgroundCleaning:
 
     def _get_right_score(self, angle, rotated_mask):
 
-        non_zero = np.count_nonzero(rotated_mask, axis=0)
-        non_zero_grad = np.diff(non_zero)
+        non_zero = np.sum(rotated_mask, axis=0)
+        non_zero_grad = self._compute_grad_2(rotated_mask, True)
 
         if non_zero[-1] > self._constants['right_book_start_threshold']:
             index = len(non_zero_grad) - 1
             right_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
-            for fac in [1, 0.8, 0.5, 0.3]:
-                page_indices = np.argwhere(non_zero > self._constants['right_book_start_threshold'] * fac)
+            for fac in self._constants['score_multiplier']:
+                page_indices = np.argwhere(non_zero_grad > self._constants['right_book_start_threshold'] * fac)
                 if len(page_indices) > 0:
                     break
             if len(page_indices) == 0:
-                raise Exception('Big gradient threshold {}. No index matched'.format(
+                print('Big gradient threshold {}. No index matched'.format(
                     self._constants['right_book_start_threshold']))
-
-            index = page_indices[-1][0]
-            s_index = max(0, index - 5)
-            e_index = min(len(non_zero_grad) - 1, index + 5)
-
-            right_score = BoundaryScore(angle, index, max(np.abs(non_zero_grad[s_index:e_index])))
+                index = rotated_mask.shape[1] - 1
+                score = -1
+            else:
+                index = page_indices[-1][0]
+                s_index = max(0, index - 5)
+                e_index = min(len(non_zero_grad) - 1, index + 5)
+                score = max(np.abs(non_zero_grad[s_index:e_index]))
+            right_score = BoundaryScore(angle, index, score)
 
         return right_score
 
@@ -93,6 +135,13 @@ class BackgroundCleaning:
 
         best_left = None
         best_right = None
+        val = np.sum(mask, axis=0)
+        # In case the image is such that apparently a large part of text is on edge. don't rotate it.
+        if val[-5:].mean() > self._constants['donot_alter_angle_threshold']:
+            best_right = BoundaryScore(0, mask.shape[1] - 1, np.inf)
+
+        if val[:5].mean() > self._constants['donot_alter_angle_threshold']:
+            best_left = BoundaryScore(0, 0, np.inf)
 
         for angle in angles:
             left, right = self.get_score(mask, angle)
@@ -128,7 +177,9 @@ class BackgroundCleaning:
     def _remove_background_left(self, img, boundary):
         orig_shape = img.shape
         new_img = rotate_image(img, boundary.angle)
-        new_img[:, :(boundary.x - 1)] = 0
+        if boundary.x > 1:
+            new_img[:, :(boundary.x - 1)] = 0
+
         left_cropped = rotate_image(new_img, -1 * boundary.angle)
 
         return self._remove_zero_padding(left_cropped, orig_shape)

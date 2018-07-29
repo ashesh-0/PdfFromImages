@@ -28,37 +28,6 @@ class BackgroundCleaning:
         mask[mask != 0] = 1
         return mask
 
-    def _get_left_score(self, angle, rotated_mask):
-        non_zero = np.count_nonzero(rotated_mask, axis=0)
-        non_zero_grad = self._compute_grad_2(rotated_mask, False)
-        if non_zero[0] > self._constants['left_book_start_threshold']:
-            index = 0
-            left_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
-        else:
-            for fac in self._constants['score_multiplier']:
-                page_indices = np.argwhere(non_zero_grad > self._constants['left_book_start_threshold'] * fac)
-                if len(page_indices) > 0:
-                    break
-            if len(page_indices) == 0:
-                print('Big gradient threshold {}. No index matched'.format(
-                    self._constants['left_book_start_threshold']))
-                score = -1
-                index = 0
-            else:
-                index = page_indices[0][0]
-                s_index = max(0, index - 5)
-                e_index = min(len(non_zero_grad) - 1, index + 5)
-                score = max(np.abs(non_zero_grad[s_index:e_index]))
-            left_score = BoundaryScore(angle, index, score)
-
-        rotated_mask = rotated_mask.copy()
-        s_index = max(0, index - 3)
-        e_index = min(rotated_mask.shape[1] - 1, index + 3)
-
-        rotated_mask[:, s_index:e_index] = 0
-
-        return left_score
-
     def _compute_grad_2(self, rotated_mask, right):
         shift = 1 if right is True else -1
 
@@ -94,6 +63,37 @@ class BackgroundCleaning:
         index_values = 2 / (1 + np.exp(index_values))
         non_zero_grad = non_zero_grad * index_values
         return non_zero_grad
+
+    def _get_left_score(self, angle, rotated_mask):
+        non_zero = np.count_nonzero(rotated_mask, axis=0)
+        non_zero_grad = self._compute_grad_2(rotated_mask, False)
+        if non_zero[0] > self._constants['left_book_start_threshold']:
+            index = 0
+            left_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
+        else:
+            for fac in self._constants['score_multiplier']:
+                page_indices = np.argwhere(non_zero_grad > self._constants['left_book_start_threshold'] * fac)
+                if len(page_indices) > 0:
+                    break
+            if len(page_indices) == 0:
+                print('Big gradient threshold {}. No index matched'.format(
+                    self._constants['left_book_start_threshold']))
+                score = -1
+                index = 0
+            else:
+                index = page_indices[0][0]
+                s_index = max(0, index - 5)
+                e_index = min(len(non_zero_grad) - 1, index + 5)
+                score = max(np.abs(non_zero_grad[s_index:e_index]))
+            left_score = BoundaryScore(angle, index, score)
+
+        rotated_mask = rotated_mask.copy()
+        s_index = max(0, index - 3)
+        e_index = min(rotated_mask.shape[1] - 1, index + 3)
+
+        rotated_mask[:, s_index:e_index] = 0
+
+        return left_score
 
     def _get_right_score(self, angle, rotated_mask):
 

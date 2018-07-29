@@ -36,7 +36,7 @@ class BackgroundCleaning:
             left_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
             for fac in self._constants['score_multiplier']:
-                page_indices = np.argwhere(non_zero > self._constants['left_book_start_threshold'] * fac)
+                page_indices = np.argwhere(non_zero_grad > self._constants['left_book_start_threshold'] * fac)
                 if len(page_indices) > 0:
                     break
             if len(page_indices) == 0:
@@ -61,11 +61,6 @@ class BackgroundCleaning:
 
     def _compute_grad_2(self, rotated_mask, right):
         shift = 1 if right is True else -1
-        # # pad zeros in left. Only one column is being padded as shift is done by 1
-        rotated_mask = np.append(np.zeros((rotated_mask.shape[0], 1)), rotated_mask, axis=1)
-
-        # # pad zeros in right. Only one column is being padded as shift is done by 1
-        rotated_mask = np.append(rotated_mask, np.zeros((rotated_mask.shape[0], 1)), axis=1)
 
         diff = np.roll(rotated_mask, shift, axis=1) - rotated_mask
         # Makes sure that all values are either {1, 0, -1}
@@ -82,22 +77,23 @@ class BackgroundCleaning:
             diff[:, 0:cutoff] = 0
             page_edge_index = np.argmax(count[::-1] > mean_val)
             page_edge_index = rotated_mask.shape[1] - page_edge_index
+
         else:
             diff[:, -cutoff] = 0
             page_edge_index = np.argmax(count > mean_val)
 
         non_zero_grad = np.sum(diff, axis=0)
 
+        # This is equivalent to padding zeros on both ends and getting derivative of first and last row.
+        non_zero_grad[0] = max(non_zero_grad[0], count[0])
+        non_zero_grad[-1] = max(non_zero_grad[-1], count[-1])
+
         index_values = np.array(range(0, rotated_mask.shape[1]))
         index_values = np.abs(index_values - page_edge_index)
         index_values = (index_values * self._constants['gradient']) / rotated_mask.shape[1]
         index_values = 2 / (1 + np.exp(index_values))
         non_zero_grad = non_zero_grad * index_values
-
-        # Since we had added one column on either side, we need to remove it before returning.
-        non_zero_grad[1] = max(non_zero_grad[0:2])
-        non_zero_grad[-2] = max(non_zero_grad[-2:])
-        return non_zero_grad[1:-1]
+        return non_zero_grad
 
     def _get_right_score(self, angle, rotated_mask):
 

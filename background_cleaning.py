@@ -35,7 +35,7 @@ class BackgroundCleaning:
             index = 0
             left_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
-            for fac in [1, 0.8, 0.5, 0.3]:
+            for fac in self._constants['score_multiplier']:
                 page_indices = np.argwhere(non_zero > self._constants['left_book_start_threshold'] * fac)
                 if len(page_indices) > 0:
                     break
@@ -61,6 +61,12 @@ class BackgroundCleaning:
 
     def _compute_grad_2(self, rotated_mask, right):
         shift = 1 if right is True else -1
+        # # pad zeros in left. Only one column is being padded as shift is done by 1
+        rotated_mask = np.append(np.zeros((rotated_mask.shape[0], 1)), rotated_mask, axis=1)
+
+        # # pad zeros in right. Only one column is being padded as shift is done by 1
+        rotated_mask = np.append(rotated_mask, np.zeros((rotated_mask.shape[0], 1)), axis=1)
+
         diff = np.roll(rotated_mask, shift, axis=1) - rotated_mask
         # Makes sure that all values are either {1, 0, -1}
         diff[diff > 0] = 1
@@ -69,7 +75,7 @@ class BackgroundCleaning:
         # It needs to be at the start of the page itself. Ignore interior derivatives.
         s = int(frac * rotated_mask.shape[1])
         count = rotated_mask.sum(axis=0)
-        mean_val = count[s:-s].mean()
+        mean_val = count[s:-s].mean() * self._constants['mean_factor']
 
         cutoff = int((1 - frac) * rotated_mask.shape[1])
         if right:
@@ -88,7 +94,10 @@ class BackgroundCleaning:
         index_values = 2 / (1 + np.exp(index_values))
         non_zero_grad = non_zero_grad * index_values
 
-        return non_zero_grad
+        # Since we had added one column on either side, we need to remove it before returning.
+        non_zero_grad[1] = max(non_zero_grad[0:2])
+        non_zero_grad[-2] = max(non_zero_grad[-2:])
+        return non_zero_grad[1:-1]
 
     def _get_right_score(self, angle, rotated_mask):
 
@@ -99,8 +108,8 @@ class BackgroundCleaning:
             index = len(non_zero_grad) - 1
             right_score = BoundaryScore(angle, index, abs(non_zero_grad[index]))
         else:
-            for fac in [1, 0.8, 0.5, 0.3, 0.1]:
-                page_indices = np.argwhere(non_zero_grad > 500 * fac)
+            for fac in self._constants['score_multiplier']:
+                page_indices = np.argwhere(non_zero_grad > self._constants['right_book_start_threshold'] * fac)
                 if len(page_indices) > 0:
                     break
             if len(page_indices) == 0:

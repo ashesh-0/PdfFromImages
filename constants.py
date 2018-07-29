@@ -10,6 +10,8 @@ def get_constants():
             'left_book_start_threshold': 800,
             'right_book_start_threshold': 800,
             'donot_alter_angle_threshold': 1000,
+            'ignore_fraction': 0.25,
+            'gradient': 10,
         },
         'split_image': {
             'bin_size': 5,

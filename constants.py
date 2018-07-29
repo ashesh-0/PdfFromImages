@@ -11,7 +11,7 @@ def get_constants():
             'right_book_start_threshold': 800,
             'donot_alter_angle_threshold': 1000,
             'ignore_fraction': 0.25,
-            'gradient': 10,
+            'gradient': 25,
         },
         'split_image': {
             'bin_size': 5,

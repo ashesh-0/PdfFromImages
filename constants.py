@@ -9,6 +9,7 @@ def get_constants():
             'angles': list(range(-10, 10)),
             'left_book_start_threshold': 800,
             'right_book_start_threshold': 800,
+            'donot_alter_angle_threshold': 1000,
         },
         'split_image': {
             'bin_size': 5,

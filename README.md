@@ -1,5 +1,5 @@
 # BookImageSplitter
-Converts list of 2 page images into 2 images for one page each.
+Converts list of 2-page book images into 1-page book images.
 
 ## Using CNNs.
 ![RawImage](./images/NN_original.png) ![](https://docs.microsoft.com/en-us/windows/win32/uxguide/images/vis-icons-image6.png) ![Image2](./images/NN_left.png) ![](./images/plus.png) ![Image3](./images/NN_right.png)
@@ -7,6 +7,7 @@ Converts list of 2 page images into 2 images for one page each.
 1. Using transfer learning, CNN is trained to do pixel segmentation of book area vs the background. [Notebook](./PagePixelSegmentation.ipynb)
 2. Using transfer learning, CNN is trained to find out the mid line of the two pages. Mid line is the line which divides the left page from the right page. [Notebook](./PageMidBoundaryPixelSegmentation.ipynb)
 3. Using weighted linear regression (with huber loss so as to ignore outliers), mid line is finetuned. This line is used both to rotate the image so that it becomes vertical in resulting image. Also, this is used to divide the image into left page and right page. [Notebook](./BookSegmentation.ipynb)
+4. Using **Dense CRF** over pixel segmentation of book area output of CNN  to improve book boundaries. KL Divergence has improved. [Notebook](./CRF_based_BookSegmentation.ipynb)
 
 ## TODO
 1. Handle rough page edges. Make them smoothe.
